@@ -98,7 +98,13 @@ static esp_err_t handler_status(httpd_req_t *req)
         "\"speed_kmh\":%.2f,\"cadence_spm\":%u,\"distance_m\":%lu,"
         "\"incline_pct\":%.1f,\"speed_is_mph\":%s,"
         "\"treadmill_name\":\"%s\",\"treadmill_addr\":\"%s\","
-        "\"has_control\":%s,\"reconnecting\":%s,\"reconnect_attempts\":%u}",
+        "\\"has_control\\":%s,\\"reconnecting\\":%s,\\"reconnect_attempts\\":%u,"
+        "\\"rsc_notifications_enabled\\":%s,\\"rsc_notify_attempts\\":%lu,"
+        "\\"rsc_notify_success\\":%lu,\\"rsc_notify_skipped\\":%lu,"
+        "\\"rsc_notify_errors\\":%lu,\\"rsc_last_error\\":%d,"
+        "\\"rsc_last_subscription_change_ms\\":%lu,\\"rsc_last_success_ms\\":%lu,"
+        "\\"rsc_last_speed_256ths_mps\\":%u,\\"rsc_last_cadence_spm\\":%u,"
+        "\\"rsc_last_distance_dm\\":%lu}",
         s_live_data.treadmill_connected ? "true" : "false",
         s_live_data.garmin_connected ? "true" : "false",
         (double)speed,
