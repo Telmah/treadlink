@@ -2,6 +2,7 @@
 #include "config_store.h"
 #include "data_bridge.h"
 #include "ble_ftms_client.h"
+#include "ble_rsc_server.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -79,10 +80,12 @@ static esp_err_t handler_index(httpd_req_t *req)
 
 static esp_err_t handler_status(httpd_req_t *req)
 {
-    char buf[384];
+    char buf[768];
     ftms_state_t ftms_state = ftms_client_get_state();
     bool reconnecting = (ftms_state == FTMS_STATE_RECONNECTING);
     uint16_t recon_attempts = ftms_client_get_reconnect_attempts();
+    rsc_diagnostics_t rsc_diag;
+    rsc_server_get_diagnostics(&rsc_diag);
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     // Return zeroed data fields when treadmill not connected (avoids stale sim data)
@@ -107,7 +110,18 @@ static esp_err_t handler_status(httpd_req_t *req)
         s_live_data.treadmill_addr,
         ftms_client_has_control() ? "true" : "false",
         reconnecting ? "true" : "false",
-        (unsigned)recon_attempts);
+        (unsigned)recon_attempts,
+        rsc_diag.notifications_enabled ? "true" : "false",
+        (unsigned long)rsc_diag.notify_attempts,
+        (unsigned long)rsc_diag.notify_success,
+        (unsigned long)rsc_diag.notify_skipped,
+        (unsigned long)rsc_diag.notify_errors,
+        rsc_diag.last_error,
+        (unsigned long)rsc_diag.last_subscription_change_ms,
+        (unsigned long)rsc_diag.last_success_ms,
+        (unsigned)rsc_diag.last_speed_256ths_mps,
+        (unsigned)rsc_diag.last_cadence_spm,
+        (unsigned long)rsc_diag.last_distance_dm);
     xSemaphoreGive(s_mutex);
 
     httpd_resp_set_type(req, "application/json");
