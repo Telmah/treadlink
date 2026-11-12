@@ -1,4 +1,5 @@
 #include "ble_ftms_client.h"
+#include "diag_trace.h"
 #include "esp_log.h"
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
@@ -120,6 +121,8 @@ static void parse_treadmill_data(const uint8_t *data, uint16_t len)
         offset += 4;
     }
 
+    diag_trace_record(DIAG_EVT_FTMS_RX, td.speed_001kmh, td.total_distance_m,
+                      flags, len, data, (uint8_t)(len > 8 ? 8 : len));
     if (s_data_cb) {
         s_data_cb(&td);
     }
@@ -157,6 +160,7 @@ static int ftms_on_subscribe(uint16_t conn_handle, const struct ble_gatt_error *
                              struct ble_gatt_attr *attr, void *arg)
 {
     if (error->status == 0) {
+        diag_trace_record(DIAG_EVT_FTMS_SUBSCRIBE, 1, conn_handle, 0, 0, NULL, 0);
         ESP_LOGI(TAG, "Subscribed to treadmill data notifications");
         set_state(FTMS_STATE_STREAMING);
         xTimerStop(s_discovery_timer, 0);
@@ -171,6 +175,7 @@ static int ftms_on_subscribe(uint16_t conn_handle, const struct ble_gatt_error *
             }
         }
     } else {
+        diag_trace_record(DIAG_EVT_FTMS_SUBSCRIBE, 0, (uint32_t)error->status, conn_handle, 0, NULL, 0);
         ESP_LOGE(TAG, "Subscribe failed: %d", error->status);
     }
     return 0;
@@ -410,6 +415,7 @@ static int ftms_gap_event(struct ble_gap_event *event, void *arg)
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
+        diag_trace_record(DIAG_EVT_FTMS_DISCONNECT, event->disconnect.reason, s_state, s_conn_handle, 0, NULL, 0);
         ESP_LOGW(TAG, "Disconnected from treadmill (reason=%d)", event->disconnect.reason);
         xTimerStop(s_discovery_timer, 0);
         s_had_working_connection = (s_state == FTMS_STATE_STREAMING);
