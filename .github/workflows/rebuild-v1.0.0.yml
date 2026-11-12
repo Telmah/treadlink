@@ -1,9 +1,10 @@
-name: Rebuild v1.0.0 (ESP-IDF 5.5.3)
+name: Build diagnostic v1.0.0 (ESP-IDF 5.5.3)
 
 on:
   push:
     branches:
       - rebuild-v1.0.0-idf553
+      - diagnostic-rsc-v1.0.0
   workflow_dispatch:
 
 permissions:
@@ -57,7 +58,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: treadlink-v1.0.0-idf553-${{ github.run_number }}
+          name: treadlink-diagnostic-v1.0.0-${{ github.run_number }}
           path: build-info/
           if-no-files-found: warn
           retention-days: 30
