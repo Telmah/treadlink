@@ -4,7 +4,7 @@
 #include "freertos/portmacro.h"
 #include <string.h>
 
-#define DIAG_RING_SIZE 512
+#define DIAG_RING_SIZE 1024
 
 static diag_event_t s_ring[DIAG_RING_SIZE];
 static uint32_t s_write_index;
