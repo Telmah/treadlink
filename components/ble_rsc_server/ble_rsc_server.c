@@ -1,5 +1,6 @@
 #include "ble_rsc_server.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
@@ -20,6 +21,20 @@ static bool s_connected;
 static bool s_notifications_enabled;
 static uint16_t s_rsc_measurement_handle;
 static bool s_first_notify_logged;
+
+// RAM-only counters: no per-packet logging and no flash writes.
+static volatile uint32_t s_notify_attempts, s_notify_success;
+static volatile uint32_t s_notify_skipped, s_notify_errors;
+static volatile int s_last_error;
+static volatile uint32_t s_last_subscription_change_ms, s_last_success_ms;
+static volatile uint16_t s_last_speed_256ths_mps;
+static volatile uint8_t s_last_cadence_spm;
+static volatile uint32_t s_last_distance_dm;
+
+static uint32_t uptime_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000ULL);
+}
 
 static void rsc_log(char level, const char *fmt, ...)
 {
@@ -142,6 +157,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
             s_conn_handle = event->connect.conn_handle;
             s_connected = true;
             s_notifications_enabled = false;
+            s_last_subscription_change_ms = uptime_ms();
             rsc_log('I', "Garmin connected");
             if (s_conn_cb) s_conn_cb(true);
         } else {
@@ -163,6 +179,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
         rsc_log('W', "Garmin disconnected (0x%02X: %s)", reason, reason_str);
         s_connected = false;
         s_notifications_enabled = false;
+        s_last_subscription_change_ms = uptime_ms();
         s_first_notify_logged = false;
         if (s_conn_cb) s_conn_cb(false);
         rsc_server_start_advertising();
@@ -172,6 +189,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (event->subscribe.attr_handle == s_rsc_measurement_handle) {
             s_notifications_enabled = event->subscribe.cur_notify;
+            s_last_subscription_change_ms = uptime_ms();
             rsc_log('I', "Garmin %s RSC notifications",
                     event->subscribe.cur_notify ? "enabled" : "disabled");
         }
@@ -218,6 +236,13 @@ esp_err_t rsc_server_init(rsc_conn_cb_t conn_cb, rsc_log_cb_t log_cb)
     s_log_cb = log_cb;
     s_connected = false;
     s_notifications_enabled = false;
+    s_notify_attempts = s_notify_success = 0;
+    s_notify_skipped = s_notify_errors = 0;
+    s_last_error = 0;
+    s_last_subscription_change_ms = s_last_success_ms = 0;
+    s_last_speed_256ths_mps = 0;
+    s_last_cadence_spm = 0;
+    s_last_distance_dm = 0;
 
     int rc = ble_gatts_count_cfg(rsc_svcs);
     if (rc != 0) {
@@ -281,10 +306,16 @@ esp_err_t rsc_server_start_advertising(void)
 
 esp_err_t rsc_server_notify(const rsc_data_t *data)
 {
+    s_notify_attempts++;
     if (!s_connected || !s_notifications_enabled) {
+        s_notify_skipped++;
         ESP_LOGD(TAG, "Notify skip: conn=%d notif=%d", s_connected, s_notifications_enabled);
         return ESP_OK;
     }
+
+    s_last_speed_256ths_mps = data->speed_256ths_mps;
+    s_last_cadence_spm = data->cadence_spm;
+    s_last_distance_dm = data->total_distance_dm;
 
     uint8_t buf[10];
     uint8_t offset = 0;
@@ -305,20 +336,29 @@ esp_err_t rsc_server_notify(const rsc_data_t *data)
 
     struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, offset);
     if (om == NULL) {
+        s_notify_errors++;
+        s_last_error = BLE_HS_ENOMEM;
         ESP_LOGD(TAG, "mbuf alloc failed, skipping notify");
         return ESP_ERR_NO_MEM;
     }
 
     int rc = ble_gatts_notify_custom(s_conn_handle, s_rsc_measurement_handle, om);
     if (rc == 0) {
+        s_notify_success++;
+        s_last_error = 0;
+        s_last_success_ms = uptime_ms();
         if (!s_first_notify_logged) {
             s_first_notify_logged = true;
             rsc_log('I', "RSC data flowing (spd=%d cad=%d)",
                     data->speed_256ths_mps, data->cadence_spm);
         }
     } else if (rc == BLE_HS_ENOMEM) {
+        s_notify_errors++;
+        s_last_error = rc;
         ESP_LOGD(TAG, "Notify backpressure, will retry next cycle");
     } else {
+        s_notify_errors++;
+        s_last_error = rc;
         rsc_log('E', "RSC notify failed: %d", rc);
     }
 
@@ -328,4 +368,26 @@ esp_err_t rsc_server_notify(const rsc_data_t *data)
 bool rsc_server_is_connected(void)
 {
     return s_connected;
+}
+
+bool rsc_server_notifications_enabled(void)
+{
+    return s_notifications_enabled;
+}
+
+void rsc_server_get_diagnostics(rsc_diagnostics_t *out)
+{
+    if (!out) return;
+    out->connected = s_connected;
+    out->notifications_enabled = s_notifications_enabled;
+    out->notify_attempts = s_notify_attempts;
+    out->notify_success = s_notify_success;
+    out->notify_skipped = s_notify_skipped;
+    out->notify_errors = s_notify_errors;
+    out->last_error = s_last_error;
+    out->last_subscription_change_ms = s_last_subscription_change_ms;
+    out->last_success_ms = s_last_success_ms;
+    out->last_speed_256ths_mps = s_last_speed_256ths_mps;
+    out->last_cadence_spm = s_last_cadence_spm;
+    out->last_distance_dm = s_last_distance_dm;
 }
