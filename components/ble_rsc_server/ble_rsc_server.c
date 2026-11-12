@@ -1,4 +1,5 @@
 #include "ble_rsc_server.h"
+#include "diag_trace.h"
 #include "esp_log.h"
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
@@ -142,6 +143,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
             s_conn_handle = event->connect.conn_handle;
             s_connected = true;
             s_notifications_enabled = false;
+            diag_trace_record(DIAG_EVT_GARMIN_CONNECT, s_conn_handle, 0, 0, 0, NULL, 0);
             rsc_log('I', "Garmin connected");
             if (s_conn_cb) s_conn_cb(true);
         } else {
@@ -160,6 +162,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
             case 0x06: reason_str = "key missing"; break;
             case 0x22: reason_str = "LL timeout"; break;
         }
+        diag_trace_record(DIAG_EVT_GARMIN_DISCONNECT, reason, s_conn_handle, 0, 0, NULL, 0);
         rsc_log('W', "Garmin disconnected (0x%02X: %s)", reason, reason_str);
         s_connected = false;
         s_notifications_enabled = false;
@@ -172,12 +175,15 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (event->subscribe.attr_handle == s_rsc_measurement_handle) {
             s_notifications_enabled = event->subscribe.cur_notify;
+            diag_trace_record(DIAG_EVT_GARMIN_SUBSCRIBE, event->subscribe.cur_notify,
+                              event->subscribe.attr_handle, event->subscribe.conn_handle, 0, NULL, 0);
             rsc_log('I', "Garmin %s RSC notifications",
                     event->subscribe.cur_notify ? "enabled" : "disabled");
         }
         break;
 
     case BLE_GAP_EVENT_ENC_CHANGE:
+        diag_trace_record(DIAG_EVT_GARMIN_ENCRYPTION, event->enc_change.status, event->enc_change.conn_handle, 0, 0, NULL, 0);
         if (event->enc_change.status != 0) {
             rsc_log('E', "Encryption failed (status=%d)", event->enc_change.status);
         }
@@ -271,6 +277,7 @@ esp_err_t rsc_server_start_advertising(void)
 
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
                             &adv_params, rsc_gap_event, NULL);
+    diag_trace_record(DIAG_EVT_ADV_RESULT, (uint32_t)rc, s_connected, s_notifications_enabled, 0, NULL, 0);
     if (rc != 0 && rc != BLE_HS_EALREADY) {
         ESP_LOGE(TAG, "Advertising start failed: %d", rc);
         return ESP_FAIL;
@@ -282,6 +289,8 @@ esp_err_t rsc_server_start_advertising(void)
 esp_err_t rsc_server_notify(const rsc_data_t *data)
 {
     if (!s_connected || !s_notifications_enabled) {
+        diag_trace_record(DIAG_EVT_RSC_SKIPPED, s_connected, s_notifications_enabled,
+                          data->speed_256ths_mps, data->total_distance_dm, NULL, 0);
         ESP_LOGD(TAG, "Notify skip: conn=%d notif=%d", s_connected, s_notifications_enabled);
         return ESP_OK;
     }
@@ -310,6 +319,9 @@ esp_err_t rsc_server_notify(const rsc_data_t *data)
     }
 
     int rc = ble_gatts_notify_custom(s_conn_handle, s_rsc_measurement_handle, om);
+    diag_trace_record(rc == 0 ? DIAG_EVT_RSC_SENT : DIAG_EVT_RSC_SKIPPED,
+                      (uint32_t)rc, s_conn_handle, data->speed_256ths_mps,
+                      data->total_distance_dm, buf, offset);
     if (rc == 0) {
         if (!s_first_notify_logged) {
             s_first_notify_logged = true;
