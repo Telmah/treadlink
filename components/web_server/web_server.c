@@ -2,6 +2,7 @@
 #include "config_store.h"
 #include "data_bridge.h"
 #include "ble_ftms_client.h"
+#include "diag_trace.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 static const char *TAG = "web_server";
 
@@ -64,6 +66,55 @@ void web_log(char level, const char *fmt, ...)
 
     s_log_write_idx++;
     xSemaphoreGive(s_mutex);
+}
+
+// --- Diagnostic snapshot (RAM only; does not restart or alter BLE) ---
+
+static esp_err_t handler_diag(httpd_req_t *req)
+{
+    diag_event_t *events = malloc(sizeof(diag_event_t) * 1024);
+    if (!events) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":\"oom\"}");
+        return ESP_OK;
+    }
+
+    size_t count = diag_trace_copy(events, 1024);
+    uint32_t total = diag_trace_total();
+    char chunk[256];
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=treadlink-diagnostics.json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    int n = snprintf(chunk, sizeof(chunk),
+                     "{\"total_events\":%lu,\"events\":[",
+                     (unsigned long)total);
+    esp_err_t err = httpd_resp_send_chunk(req, chunk, n);
+
+    for (size_t i = 0; err == ESP_OK && i < count; i++) {
+        const diag_event_t *e = &events[i];
+        int pos = snprintf(chunk, sizeof(chunk),
+            "%s{\"t_us\":%lld,\"seq\":%lu,\"type\":%u,"
+            "\"a\":%lu,\"b\":%lu,\"c\":%lu,\"d\":%lu,\"bytes\":\"",
+            i ? "," : "",
+            (long long)e->time_us, (unsigned long)e->sequence, (unsigned)e->type,
+            (unsigned long)e->a, (unsigned long)e->b,
+            (unsigned long)e->c, (unsigned long)e->d);
+        for (uint8_t j = 0; j < e->data_len && pos < (int)sizeof(chunk) - 4; j++) {
+            pos += snprintf(chunk + pos, sizeof(chunk) - pos, "%02X", e->data[j]);
+        }
+        pos += snprintf(chunk + pos, sizeof(chunk) - pos, "\"}");
+        err = httpd_resp_send_chunk(req, chunk, pos);
+    }
+
+    if (err == ESP_OK) {
+        snprintf(chunk, sizeof(chunk), "]}");
+        err = httpd_resp_send_chunk(req, chunk, HTTPD_RESP_USE_STRLEN);
+    }
+    httpd_resp_send_chunk(req, NULL, 0);
+    free(events);
+    return ESP_OK;
 }
 
 // --- Handlers ---
@@ -558,6 +609,9 @@ static esp_err_t handler_simulate(httpd_req_t *req)
 static const httpd_uri_t uri_index = {
     .uri = "/", .method = HTTP_GET, .handler = handler_index
 };
+static const httpd_uri_t uri_diag = {
+    .uri = "/api/diag", .method = HTTP_GET, .handler = handler_diag
+};
 static const httpd_uri_t uri_status = {
     .uri = "/api/status", .method = HTTP_GET, .handler = handler_status
 };
@@ -628,6 +682,7 @@ esp_err_t web_server_start(void)
 
     httpd_register_uri_handler(server, &uri_index);
     httpd_register_uri_handler(server, &uri_status);
+    httpd_register_uri_handler(server, &uri_diag);
     httpd_register_uri_handler(server, &uri_log);
     httpd_register_uri_handler(server, &uri_scan);
     httpd_register_uri_handler(server, &uri_scan_results);
