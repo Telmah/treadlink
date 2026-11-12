@@ -341,3 +341,8 @@ bool rsc_server_is_connected(void)
 {
     return s_connected;
 }
+
+bool rsc_server_notifications_enabled(void)
+{
+    return s_notifications_enabled;
+}
