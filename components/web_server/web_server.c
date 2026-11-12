@@ -2,6 +2,7 @@
 #include "config_store.h"
 #include "data_bridge.h"
 #include "ble_ftms_client.h"
+#include "ble_rsc_server.h"
 #include "diag_trace.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -88,8 +89,13 @@ static esp_err_t handler_diag(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
     int n = snprintf(chunk, sizeof(chunk),
-                     "{\"total_events\":%lu,\"events\":[",
-                     (unsigned long)total);
+                     "{\"total_events\":%lu,\"snapshot\":{\"ftms_connected\":%s,"
+                     "\"ftms_state\":%u,\"garmin_connected\":%s,\"garmin_notifications_enabled\":%s},\"events\":[",
+                     (unsigned long)total,
+                     ftms_client_is_connected() ? "true" : "false",
+                     (unsigned)ftms_client_get_state(),
+                     rsc_server_is_connected() ? "true" : "false",
+                     rsc_server_notifications_enabled() ? "true" : "false");
     esp_err_t err = httpd_resp_send_chunk(req, chunk, n);
 
     for (size_t i = 0; err == ESP_OK && i < count; i++) {
