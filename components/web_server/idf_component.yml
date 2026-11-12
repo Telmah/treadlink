@@ -1,2 +1,2 @@
 dependencies:
-  espressif/cjson: "^1.7.19"
+  espressif/cjson: "1.*"
