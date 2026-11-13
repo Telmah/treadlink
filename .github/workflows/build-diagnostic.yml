@@ -1,0 +1,40 @@
+name: Build diagnostic firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit to build"
+        required: true
+        default: "diagnostic-rsc-v1.1.0"
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -v
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: treadlink-${{ inputs.ref }}-${{ github.run_number }}
+          path: |
+            .pio/build/seeed_xiao_esp32s3/firmware.bin
+            .pio/build/seeed_xiao_esp32s3/bootloader.bin
+            .pio/build/seeed_xiao_esp32s3/partitions.bin
+          if-no-files-found: error
