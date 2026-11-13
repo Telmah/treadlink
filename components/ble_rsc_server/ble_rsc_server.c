@@ -134,9 +134,58 @@ static const struct ble_gatt_svc_def rsc_svcs[] = {
     {0},
 };
 
+// Capture GAP callback order and RSC state before/after each callback.
+// The event-specific payload is kept in the existing 8-byte diagnostic data field.
+static uint32_t rsc_diag_state_flags(void)
+{
+    return (s_connected ? 1U : 0U) | (s_notifications_enabled ? 2U : 0U);
+}
+
+static void rsc_diag_gap_callback(uint8_t trace_type, const struct ble_gap_event *event)
+{
+    uint8_t detail[8] = {0};
+    uint8_t detail_len = 0;
+
+    switch (event->type) {
+    case BLE_GAP_EVENT_CONNECT:
+        detail[0] = (uint8_t)event->connect.status;
+        detail[1] = (uint8_t)(event->connect.conn_handle & 0xFF);
+        detail[2] = (uint8_t)(event->connect.conn_handle >> 8);
+        detail_len = 3;
+        break;
+    case BLE_GAP_EVENT_DISCONNECT:
+        detail[0] = event->disconnect.reason;
+        detail[1] = (uint8_t)(s_conn_handle & 0xFF);
+        detail[2] = (uint8_t)(s_conn_handle >> 8);
+        detail_len = 3;
+        break;
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        detail[0] = event->subscribe.cur_notify ? 1 : 0;
+        detail[1] = event->subscribe.cur_indicate ? 1 : 0;
+        detail[2] = (uint8_t)(event->subscribe.attr_handle & 0xFF);
+        detail[3] = (uint8_t)(event->subscribe.attr_handle >> 8);
+        detail[4] = (uint8_t)(event->subscribe.conn_handle & 0xFF);
+        detail[5] = (uint8_t)(event->subscribe.conn_handle >> 8);
+        detail_len = 6;
+        break;
+    case BLE_GAP_EVENT_ENC_CHANGE:
+        detail[0] = (uint8_t)event->enc_change.status;
+        detail[1] = (uint8_t)(event->enc_change.conn_handle & 0xFF);
+        detail[2] = (uint8_t)(event->enc_change.conn_handle >> 8);
+        detail_len = 3;
+        break;
+    default:
+        break;
+    }
+
+    diag_trace_record(trace_type, (uint32_t)event->type, s_conn_handle,
+                      rsc_diag_state_flags(), 0, detail, detail_len);
+}
+
 // GAP event handler
 static int rsc_gap_event(struct ble_gap_event *event, void *arg)
 {
+    rsc_diag_gap_callback(DIAG_EVT_GAP_CALLBACK_ENTER, event);
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
@@ -204,6 +253,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
         if (rc == 0) {
             ble_store_util_delete_peer(&desc.peer_id_addr);
         }
+        rsc_diag_gap_callback(DIAG_EVT_GAP_CALLBACK_EXIT, event);
         return BLE_GAP_REPEAT_PAIRING_RETRY;
     }
 
@@ -215,6 +265,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
         break;
     }
 
+    rsc_diag_gap_callback(DIAG_EVT_GAP_CALLBACK_EXIT, event);
     return 0;
 }
 
