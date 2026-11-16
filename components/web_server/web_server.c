@@ -2,6 +2,8 @@
 #include "config_store.h"
 #include "data_bridge.h"
 #include "ble_ftms_client.h"
+#include "ble_rsc_server.h"
+#include "diag_trace.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -11,6 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 static const char *TAG = "web_server";
 
@@ -64,6 +67,69 @@ void web_log(char level, const char *fmt, ...)
 
     s_log_write_idx++;
     xSemaphoreGive(s_mutex);
+}
+
+// --- Diagnostic snapshot (RAM only; does not restart or alter BLE) ---
+
+static esp_err_t handler_diag(httpd_req_t *req)
+{
+    // Keep only a small batch on the task stack. The complete ring is streamed
+    // in sequence order so this endpoint does not need a large contiguous heap block.
+    enum { DIAG_HTTP_BATCH = 8 };
+    diag_event_t events[DIAG_HTTP_BATCH];
+    uint32_t total = diag_trace_total();
+    uint32_t first_sequence = total > 2048U ? total - 2048U + 1U : 1U;
+    uint32_t last_sequence = total;
+    uint32_t next_sequence = first_sequence;
+    bool first_event = true;
+    char chunk[256];
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=treadlink-diagnostics.json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    int n = snprintf(chunk, sizeof(chunk),
+                     "{\"total_events\":%lu,\"snapshot\":{\"ftms_connected\":%s,"
+                     "\"ftms_state\":%u,\"garmin_connected\":%s,\"garmin_notifications_enabled\":%s},\"events\":[",
+                     (unsigned long)total,
+                     ftms_client_is_connected() ? "true" : "false",
+                     (unsigned)ftms_client_get_state(),
+                     rsc_server_is_connected() ? "true" : "false",
+                     rsc_server_notifications_enabled() ? "true" : "false");
+    esp_err_t err = httpd_resp_send_chunk(req, chunk, n);
+
+    while (err == ESP_OK && next_sequence <= last_sequence) {
+        size_t count = diag_trace_copy_range(events, next_sequence, last_sequence, DIAG_HTTP_BATCH);
+        if (count == 0) {
+            break;
+        }
+
+        for (size_t i = 0; err == ESP_OK && i < count; i++) {
+            const diag_event_t *e = &events[i];
+            int pos = snprintf(chunk, sizeof(chunk),
+                "%s{\"t_us\":%lld,\"seq\":%lu,\"type\":%u,"
+                "\"a\":%lu,\"b\":%lu,\"c\":%lu,\"d\":%lu,\"bytes\":\"",
+                first_event ? "" : ",",
+                (long long)e->time_us, (unsigned long)e->sequence, (unsigned)e->type,
+                (unsigned long)e->a, (unsigned long)e->b,
+                (unsigned long)e->c, (unsigned long)e->d);
+            for (uint8_t j = 0; j < e->data_len && pos < (int)sizeof(chunk) - 4; j++) {
+                pos += snprintf(chunk + pos, sizeof(chunk) - (size_t)pos, "%02X", e->data[j]);
+            }
+            pos += snprintf(chunk + pos, sizeof(chunk) - (size_t)pos, "\"}");
+            err = httpd_resp_send_chunk(req, chunk, pos);
+            first_event = false;
+        }
+
+        next_sequence = events[count - 1].sequence + 1U;
+    }
+
+    if (err == ESP_OK) {
+        snprintf(chunk, sizeof(chunk), "]}");
+        err = httpd_resp_send_chunk(req, chunk, HTTPD_RESP_USE_STRLEN);
+    }
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
 }
 
 // --- Handlers ---
@@ -558,6 +624,9 @@ static esp_err_t handler_simulate(httpd_req_t *req)
 static const httpd_uri_t uri_index = {
     .uri = "/", .method = HTTP_GET, .handler = handler_index
 };
+static const httpd_uri_t uri_diag = {
+    .uri = "/api/diag", .method = HTTP_GET, .handler = handler_diag
+};
 static const httpd_uri_t uri_status = {
     .uri = "/api/status", .method = HTTP_GET, .handler = handler_status
 };
@@ -628,6 +697,7 @@ esp_err_t web_server_start(void)
 
     httpd_register_uri_handler(server, &uri_index);
     httpd_register_uri_handler(server, &uri_status);
+    httpd_register_uri_handler(server, &uri_diag);
     httpd_register_uri_handler(server, &uri_log);
     httpd_register_uri_handler(server, &uri_scan);
     httpd_register_uri_handler(server, &uri_scan_results);
