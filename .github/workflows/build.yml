@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, diagnostic-rsc-v1.1.1-gap-lifecycle]
   pull_request:
     branches: [main]
 
@@ -18,7 +18,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.1.19
 
       - name: Build firmware
         run: pio run
