@@ -253,7 +253,8 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
         if (event->subscribe.attr_handle == s_rsc_measurement_handle) {
             s_notifications_enabled = event->subscribe.cur_notify;
             diag_trace_record(DIAG_EVT_GARMIN_SUBSCRIBE, event->subscribe.cur_notify,
-                              event->subscribe.attr_handle, event->subscribe.conn_handle, 0, NULL, 0);
+                              event->subscribe.attr_handle, event->subscribe.conn_handle,
+                              event->subscribe.reason, NULL, 0);
             rsc_log('I', "Garmin %s RSC notifications",
                     event->subscribe.cur_notify ? "enabled" : "disabled");
         }
