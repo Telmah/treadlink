@@ -16,7 +16,9 @@ typedef enum {
     DIAG_EVT_FTMS_SUBSCRIBE = 10,
     DIAG_EVT_FTMS_DISCONNECT = 11,
     DIAG_EVT_GAP_CALLBACK_ENTER = 12,
-    DIAG_EVT_GAP_CALLBACK_EXIT = 13
+    DIAG_EVT_GAP_CALLBACK_EXIT = 13,
+    DIAG_EVT_GAP_CONN_INFO = 14,
+    DIAG_EVT_ADV_START = 15
 } diag_event_type_t;
 
 typedef struct {
