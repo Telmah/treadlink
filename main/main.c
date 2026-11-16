@@ -12,6 +12,7 @@
 #include "data_bridge.h"
 #include "wifi_manager.h"
 #include "web_server.h"
+#include "diag_trace.h"
 
 static const char *TAG = "treadlink";
 
@@ -100,6 +101,7 @@ static void watchdog_task(void *arg)
 
 void app_main(void)
 {
+    diag_trace_init();
     ESP_LOGI(TAG, "TreadLink starting...");
 
     // NVS + config

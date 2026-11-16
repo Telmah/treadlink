@@ -1,4 +1,5 @@
 #include "data_bridge.h"
+#include "diag_trace.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -94,6 +95,8 @@ rsc_data_t data_bridge_convert(const ftms_treadmill_data_t *ftms)
         rsc.total_distance_dm = s_fallback_distance_dm;
     }
 
+    diag_trace_record(DIAG_EVT_RSC_READY, ftms->speed_001kmh, rsc.speed_256ths_mps,
+                      rsc.cadence_spm, rsc.total_distance_dm, NULL, 0);
     return rsc;
 }
 
