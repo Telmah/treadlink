@@ -73,14 +73,14 @@ void web_log(char level, const char *fmt, ...)
 
 static esp_err_t handler_diag(httpd_req_t *req)
 {
-    diag_event_t *events = malloc(sizeof(diag_event_t) * 1024);
+    diag_event_t *events = malloc(sizeof(diag_event_t) * 2048);
     if (!events) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\":\"oom\"}");
         return ESP_OK;
     }
 
-    size_t count = diag_trace_copy(events, 1024);
+    size_t count = diag_trace_copy(events, 2048);
     uint32_t total = diag_trace_total();
     char chunk[256];
 
