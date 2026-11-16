@@ -141,7 +141,10 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
         if (event->connect.status == 0) {
             s_conn_handle = event->connect.conn_handle;
             s_connected = true;
-            s_notifications_enabled = false;
+            // Do not clear s_notifications_enabled here. NimBLE may emit
+            // BLE_GAP_EVENT_SUBSCRIBE with reason RESTORE before CONNECT
+            // when a bonded peer's CCCD state is restored from the store.
+            // The flag is initialized at startup and cleared on DISCONNECT.
             rsc_log('I', "Garmin connected");
             if (s_conn_cb) s_conn_cb(true);
         } else {
