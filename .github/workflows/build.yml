@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, diagnostic-rsc-v1.1.1-gap-lifecycle]
+    branches: [main, diagnostic-rsc-v1.1.1-gap-lifecycle, fix-diag-api-streaming]
   pull_request:
     branches: [main]
 
