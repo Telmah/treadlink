@@ -180,9 +180,37 @@ static void rsc_diag_gap_callback(uint8_t trace_type, const struct ble_gap_event
 
     diag_trace_record(trace_type, (uint32_t)event->type, s_conn_handle,
                       rsc_diag_state_flags(), 0, detail, detail_len);
+
+    // On callback entry, capture the controller's current connection descriptor.
+    // This lets us correlate callbacks even when CONNECT is delivered late and
+    // NimBLE reuses a connection handle after disconnect.
+    if (trace_type == DIAG_EVT_GAP_CALLBACK_ENTER) {
+        uint16_t handle = s_conn_handle;
+        if (event->type == BLE_GAP_EVENT_CONNECT && event->connect.status == 0) {
+            handle = event->connect.conn_handle;
+        } else if (event->type == BLE_GAP_EVENT_SUBSCRIBE) {
+            handle = event->subscribe.conn_handle;
+        } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE) {
+            handle = event->enc_change.conn_handle;
+        }
+
+        struct ble_gap_conn_desc desc;
+        if (ble_gap_conn_find(handle, &desc) == 0) {
+            uint8_t peer[8] = {0};
+            peer[0] = desc.peer_id_addr.type;
+            memcpy(&peer[1], desc.peer_id_addr.val, 6);
+            peer[7] = desc.role;
+            diag_trace_record(DIAG_EVT_GAP_CONN_INFO, (uint32_t)event->type,
+                              handle,
+                              ((uint32_t)desc.conn_itvl << 16) | desc.conn_latency,
+                              desc.supervision_timeout, peer, sizeof(peer));
+        }
+    }
 }
 
 // GAP event handler
+static esp_err_t rsc_server_start_advertising_internal(uint8_t source);
+
 static int rsc_gap_event(struct ble_gap_event *event, void *arg)
 {
     rsc_diag_gap_callback(DIAG_EVT_GAP_CALLBACK_ENTER, event);
@@ -196,7 +224,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
             rsc_log('I', "Garmin connected");
             if (s_conn_cb) s_conn_cb(true);
         } else {
-            rsc_server_start_advertising();
+            rsc_server_start_advertising_internal(1);
         }
         break;
 
@@ -217,7 +245,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
         s_notifications_enabled = false;
         s_first_notify_logged = false;
         if (s_conn_cb) s_conn_cb(false);
-        rsc_server_start_advertising();
+        rsc_server_start_advertising_internal(2);
         break;
     }
 
@@ -258,7 +286,7 @@ static int rsc_gap_event(struct ble_gap_event *event, void *arg)
     }
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
-        rsc_server_start_advertising();
+        rsc_server_start_advertising_internal(3);
         break;
 
     default:
@@ -292,8 +320,12 @@ esp_err_t rsc_server_init(rsc_conn_cb_t conn_cb, rsc_log_cb_t log_cb)
     return ESP_OK;
 }
 
-esp_err_t rsc_server_start_advertising(void)
+static esp_err_t rsc_server_start_advertising_internal(uint8_t source)
 {
+    // source: 1=connect failed, 2=disconnect, 3=advertising complete, 4=external/init
+    diag_trace_record(DIAG_EVT_ADV_START, source, s_connected,
+                      s_notifications_enabled, s_conn_handle, NULL, 0);
+
     struct ble_gap_adv_params adv_params = {
         .conn_mode = BLE_GAP_CONN_MODE_UND,
         .disc_mode = BLE_GAP_DISC_MODE_GEN,
@@ -328,13 +360,18 @@ esp_err_t rsc_server_start_advertising(void)
 
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
                             &adv_params, rsc_gap_event, NULL);
-    diag_trace_record(DIAG_EVT_ADV_RESULT, (uint32_t)rc, s_connected, s_notifications_enabled, 0, NULL, 0);
+    diag_trace_record(DIAG_EVT_ADV_RESULT, (uint32_t)rc, s_connected, s_notifications_enabled, source, NULL, 0);
     if (rc != 0 && rc != BLE_HS_EALREADY) {
         ESP_LOGE(TAG, "Advertising start failed: %d", rc);
         return ESP_FAIL;
     }
 
     return ESP_OK;
+}
+
+esp_err_t rsc_server_start_advertising(void)
+{
+    return rsc_server_start_advertising_internal(4);
 }
 
 esp_err_t rsc_server_notify(const rsc_data_t *data)
