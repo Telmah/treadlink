@@ -18,7 +18,12 @@ typedef enum {
     DIAG_EVT_GAP_CALLBACK_ENTER = 12,
     DIAG_EVT_GAP_CALLBACK_EXIT = 13,
     DIAG_EVT_GAP_CONN_INFO = 14,
-    DIAG_EVT_ADV_START = 15
+    DIAG_EVT_ADV_START = 15,
+    DIAG_EVT_HEARTBEAT = 16,
+    DIAG_EVT_BOOT = 17,
+    DIAG_EVT_BLE_HOST_RESET = 18,
+    DIAG_EVT_BLE_HOST_SYNC = 19,
+    DIAG_EVT_RSC_ERROR = 20
 } diag_event_type_t;
 
 typedef struct {
