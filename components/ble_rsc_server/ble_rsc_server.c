@@ -414,6 +414,7 @@ esp_err_t rsc_server_notify(const rsc_data_t *data)
     struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, offset);
     if (om == NULL) {
         s_notify_errors++;
+        diag_trace_record(DIAG_EVT_RSC_ERROR, (uint32_t)ESP_ERR_NO_MEM, s_conn_handle, 2, 0, NULL, 0);
         ESP_LOGD(TAG, "mbuf alloc failed, skipping notify");
         return ESP_ERR_NO_MEM;
     }
