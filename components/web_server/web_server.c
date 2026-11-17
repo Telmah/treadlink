@@ -91,11 +91,11 @@ static esp_err_t handler_diag(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
     int n = snprintf(chunk, sizeof(chunk),
-                     "{\\"total_events\\":%lu,\\"snapshot\\":{\\"uptime_us\\":%lld,"
-                     "\\"ftms_connected\\":%s,\\"ftms_state\\":%u,\\"garmin_connected\\":%s,"
-                     "\\"garmin_notifications_enabled\\":%s,\\"rsc_attempts\\":%lu,"
-                     "\\"rsc_sent\\":%lu,\\"rsc_skipped\\":%lu,\\"rsc_errors\\":%lu,"
-                     "\\"free_heap\\":%lu,\\"min_free_heap\\":%lu},\\"events\\":[",
+                     "{\"total_events\":%lu,\"snapshot\":{\"uptime_us\":%lld,"
+                     "\"ftms_connected\":%s,\"ftms_state\":%u,\"garmin_connected\":%s,"
+                     "\"garmin_notifications_enabled\":%s,\"rsc_attempts\":%lu,"
+                     "\"rsc_sent\":%lu,\"rsc_skipped\":%lu,\"rsc_errors\":%lu,"
+                     "\"free_heap\":%lu,\"min_free_heap\":%lu},\"events\":[",
                      (unsigned long)total, (long long)esp_timer_get_time(),
                      ftms_client_is_connected() ? "true" : "false",
                      (unsigned)ftms_client_get_state(),
@@ -114,8 +114,8 @@ static esp_err_t handler_diag(httpd_req_t *req)
         for (size_t i = 0; err == ESP_OK && i < count; i++) {
             const diag_event_t *e = &events[i];
             int pos = snprintf(chunk, sizeof(chunk),
-                "%s{\\"t_us\\":%lld,\\"seq\\":%lu,\\"type\\":%u,"
-                "\\"a\\":%lu,\\"b\\":%lu,\\"c\\":%lu,\\"d\\":%lu,\\"bytes\\":\\"",
+                "%s{\"t_us\":%lld,\"seq\":%lu,\"type\":%u,"
+                "\"a\":%lu,\"b\":%lu,\"c\":%lu,\"d\":%lu,\"bytes\":\"",
                 first_event ? "" : ",",
                 (long long)e->time_us, (unsigned long)e->sequence, (unsigned)e->type,
                 (unsigned long)e->a, (unsigned long)e->b,
@@ -123,7 +123,7 @@ static esp_err_t handler_diag(httpd_req_t *req)
             for (uint8_t j = 0; j < e->data_len && pos < (int)sizeof(chunk) - 4; j++) {
                 pos += snprintf(chunk + pos, sizeof(chunk) - (size_t)pos, "%02X", e->data[j]);
             }
-            pos += snprintf(chunk + pos, sizeof(chunk) - (size_t)pos, "\\"}");
+            pos += snprintf(chunk + pos, sizeof(chunk) - (size_t)pos, "\"}");
             err = httpd_resp_send_chunk(req, chunk, pos);
             first_event = false;
         }
