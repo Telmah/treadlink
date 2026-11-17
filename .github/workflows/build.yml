@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, diagnostic-rsc-v1.1.1-gap-lifecycle]
+    branches: [main, diagnostic-rsc-v1.1.1-gap-lifecycle, diag-longrun-ble-capture]
   pull_request:
     branches: [main]
 

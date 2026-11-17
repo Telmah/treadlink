@@ -1,5 +1,7 @@
 #include <string.h>
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,6 +19,8 @@
 static const char *TAG = "treadlink";
 
 static treadlink_config_t s_config;
+static volatile uint32_t s_ftms_data_count;
+static int64_t s_last_diag_heartbeat_us;
 
 // --- Callbacks ---
 
@@ -46,6 +50,7 @@ static void update_led_state(void)
 
 static void on_treadmill_data(const ftms_treadmill_data_t *ftms)
 {
+    s_ftms_data_count++;
     rsc_data_t rsc = data_bridge_convert(ftms);
     rsc_server_notify(&rsc);
     web_server_update_data(ftms, &rsc,
@@ -93,6 +98,31 @@ static void watchdog_task(void *arg)
         esp_task_wdt_reset();
         update_led_state();
         restart_rsc_adv_if_needed();
+
+        // One compact health sample every five minutes. Unlike per-packet
+        // FTMS/RSC events, this keeps a multi-day history in the RAM ring.
+        int64_t now_us = esp_timer_get_time();
+        if (now_us - s_last_diag_heartbeat_us >= 300000000LL) {
+            s_last_diag_heartbeat_us = now_us;
+            uint32_t attempts = 0, sent = 0, skipped = 0, errors = 0;
+            rsc_server_get_diag_counters(&attempts, &sent, &skipped, &errors);
+            uint8_t detail[8] = {0};
+            detail[0] = (ftms_client_is_connected() ? 1 : 0) |
+                        (rsc_server_is_connected() ? 2 : 0) |
+                        (rsc_server_notifications_enabled() ? 4 : 0) |
+                        (ftms_client_has_control() ? 8 : 0);
+            detail[1] = (uint8_t)ftms_client_get_state();
+            uint32_t free_kb = (uint32_t)(esp_get_free_heap_size() / 1024U);
+            uint32_t min_kb = (uint32_t)(esp_get_minimum_free_heap_size() / 1024U);
+            detail[2] = (uint8_t)(free_kb & 0xFF);
+            detail[3] = (uint8_t)((free_kb >> 8) & 0xFF);
+            detail[4] = (uint8_t)(min_kb & 0xFF);
+            detail[5] = (uint8_t)((min_kb >> 8) & 0xFF);
+            detail[6] = (uint8_t)(ftms_client_get_reconnect_attempts() & 0xFF);
+            detail[7] = (uint8_t)(errors & 0xFF);
+            diag_trace_record(DIAG_EVT_HEARTBEAT, s_ftms_data_count,
+                              attempts, sent, skipped, detail, sizeof(detail));
+        }
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
@@ -102,6 +132,9 @@ static void watchdog_task(void *arg)
 void app_main(void)
 {
     diag_trace_init();
+    diag_trace_record(DIAG_EVT_BOOT, (uint32_t)esp_reset_reason(),
+                      (uint32_t)esp_get_free_heap_size(),
+                      (uint32_t)esp_get_minimum_free_heap_size(), 0, NULL, 0);
     ESP_LOGI(TAG, "TreadLink starting...");
 
     // NVS + config

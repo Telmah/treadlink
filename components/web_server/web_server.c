@@ -7,6 +7,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -73,45 +74,60 @@ void web_log(char level, const char *fmt, ...)
 
 static esp_err_t handler_diag(httpd_req_t *req)
 {
-    diag_event_t *events = malloc(sizeof(diag_event_t) * 2048);
-    if (!events) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_sendstr(req, "{\"error\":\"oom\"}");
-        return ESP_OK;
-    }
-
-    size_t count = diag_trace_copy(events, 2048);
+    // Stream the ring in small batches to avoid a large contiguous heap allocation.
+    enum { DIAG_HTTP_BATCH = 8 };
+    diag_event_t events[DIAG_HTTP_BATCH];
     uint32_t total = diag_trace_total();
-    char chunk[256];
+    uint32_t first_sequence = total > 2048U ? total - 2048U + 1U : 1U;
+    uint32_t last_sequence = total;
+    uint32_t next_sequence = first_sequence;
+    bool first_event = true;
+    char chunk[512];
+    uint32_t attempts = 0, sent = 0, skipped = 0, errors = 0;
+    rsc_server_get_diag_counters(&attempts, &sent, &skipped, &errors);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=treadlink-diagnostics.json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
     int n = snprintf(chunk, sizeof(chunk),
-                     "{\"total_events\":%lu,\"snapshot\":{\"ftms_connected\":%s,"
-                     "\"ftms_state\":%u,\"garmin_connected\":%s,\"garmin_notifications_enabled\":%s},\"events\":[",
-                     (unsigned long)total,
+                     "{\"total_events\":%lu,\"snapshot\":{\"uptime_us\":%lld,"
+                     "\"ftms_connected\":%s,\"ftms_state\":%u,\"garmin_connected\":%s,"
+                     "\"garmin_notifications_enabled\":%s,\"rsc_attempts\":%lu,"
+                     "\"rsc_sent\":%lu,\"rsc_skipped\":%lu,\"rsc_errors\":%lu,"
+                     "\"free_heap\":%lu,\"min_free_heap\":%lu},\"events\":[",
+                     (unsigned long)total, (long long)esp_timer_get_time(),
                      ftms_client_is_connected() ? "true" : "false",
                      (unsigned)ftms_client_get_state(),
                      rsc_server_is_connected() ? "true" : "false",
-                     rsc_server_notifications_enabled() ? "true" : "false");
+                     rsc_server_notifications_enabled() ? "true" : "false",
+                     (unsigned long)attempts, (unsigned long)sent,
+                     (unsigned long)skipped, (unsigned long)errors,
+                     (unsigned long)esp_get_free_heap_size(),
+                     (unsigned long)esp_get_minimum_free_heap_size());
     esp_err_t err = httpd_resp_send_chunk(req, chunk, n);
 
-    for (size_t i = 0; err == ESP_OK && i < count; i++) {
-        const diag_event_t *e = &events[i];
-        int pos = snprintf(chunk, sizeof(chunk),
-            "%s{\"t_us\":%lld,\"seq\":%lu,\"type\":%u,"
-            "\"a\":%lu,\"b\":%lu,\"c\":%lu,\"d\":%lu,\"bytes\":\"",
-            i ? "," : "",
-            (long long)e->time_us, (unsigned long)e->sequence, (unsigned)e->type,
-            (unsigned long)e->a, (unsigned long)e->b,
-            (unsigned long)e->c, (unsigned long)e->d);
-        for (uint8_t j = 0; j < e->data_len && pos < (int)sizeof(chunk) - 4; j++) {
-            pos += snprintf(chunk + pos, sizeof(chunk) - pos, "%02X", e->data[j]);
+    while (err == ESP_OK && next_sequence <= last_sequence) {
+        size_t count = diag_trace_copy_range(events, next_sequence, last_sequence, DIAG_HTTP_BATCH);
+        if (count == 0) break;
+
+        for (size_t i = 0; err == ESP_OK && i < count; i++) {
+            const diag_event_t *e = &events[i];
+            int pos = snprintf(chunk, sizeof(chunk),
+                "%s{\"t_us\":%lld,\"seq\":%lu,\"type\":%u,"
+                "\"a\":%lu,\"b\":%lu,\"c\":%lu,\"d\":%lu,\"bytes\":\"",
+                first_event ? "" : ",",
+                (long long)e->time_us, (unsigned long)e->sequence, (unsigned)e->type,
+                (unsigned long)e->a, (unsigned long)e->b,
+                (unsigned long)e->c, (unsigned long)e->d);
+            for (uint8_t j = 0; j < e->data_len && pos < (int)sizeof(chunk) - 4; j++) {
+                pos += snprintf(chunk + pos, sizeof(chunk) - (size_t)pos, "%02X", e->data[j]);
+            }
+            pos += snprintf(chunk + pos, sizeof(chunk) - (size_t)pos, "\"}");
+            err = httpd_resp_send_chunk(req, chunk, pos);
+            first_event = false;
         }
-        pos += snprintf(chunk + pos, sizeof(chunk) - pos, "\"}");
-        err = httpd_resp_send_chunk(req, chunk, pos);
+        next_sequence = events[count - 1].sequence + 1U;
     }
 
     if (err == ESP_OK) {
@@ -119,7 +135,6 @@ static esp_err_t handler_diag(httpd_req_t *req)
         err = httpd_resp_send_chunk(req, chunk, HTTPD_RESP_USE_STRLEN);
     }
     httpd_resp_send_chunk(req, NULL, 0);
-    free(events);
     return ESP_OK;
 }
 
