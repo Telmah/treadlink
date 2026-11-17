@@ -7,6 +7,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -81,20 +82,29 @@ static esp_err_t handler_diag(httpd_req_t *req)
     uint32_t last_sequence = total;
     uint32_t next_sequence = first_sequence;
     bool first_event = true;
-    char chunk[256];
+    char chunk[512];
+    uint32_t attempts = 0, sent = 0, skipped = 0, errors = 0;
+    rsc_server_get_diag_counters(&attempts, &sent, &skipped, &errors);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=treadlink-diagnostics.json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
     int n = snprintf(chunk, sizeof(chunk),
-                     "{\\"total_events\\":%lu,\\"snapshot\\":{\\"ftms_connected\\":%s,"
-                     "\\"ftms_state\\":%u,\\"garmin_connected\\":%s,\\"garmin_notifications_enabled\\":%s},\\"events\\":[",
-                     (unsigned long)total,
+                     "{\\"total_events\\":%lu,\\"snapshot\\":{\\"uptime_us\\":%lld,"
+                     "\\"ftms_connected\\":%s,\\"ftms_state\\":%u,\\"garmin_connected\\":%s,"
+                     "\\"garmin_notifications_enabled\\":%s,\\"rsc_attempts\\":%lu,"
+                     "\\"rsc_sent\\":%lu,\\"rsc_skipped\\":%lu,\\"rsc_errors\\":%lu,"
+                     "\\"free_heap\\":%lu,\\"min_free_heap\\":%lu},\\"events\\":[",
+                     (unsigned long)total, (long long)esp_timer_get_time(),
                      ftms_client_is_connected() ? "true" : "false",
                      (unsigned)ftms_client_get_state(),
                      rsc_server_is_connected() ? "true" : "false",
-                     rsc_server_notifications_enabled() ? "true" : "false");
+                     rsc_server_notifications_enabled() ? "true" : "false",
+                     (unsigned long)attempts, (unsigned long)sent,
+                     (unsigned long)skipped, (unsigned long)errors,
+                     (unsigned long)esp_get_free_heap_size(),
+                     (unsigned long)esp_get_minimum_free_heap_size());
     esp_err_t err = httpd_resp_send_chunk(req, chunk, n);
 
     while (err == ESP_OK && next_sequence <= last_sequence) {
