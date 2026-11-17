@@ -21,6 +21,10 @@ static bool s_connected;
 static bool s_notifications_enabled;
 static uint16_t s_rsc_measurement_handle;
 static bool s_first_notify_logged;
+static uint32_t s_notify_attempts;
+static uint32_t s_notify_sent;
+static uint32_t s_notify_skipped;
+static uint32_t s_notify_errors;
 
 static void rsc_log(char level, const char *fmt, ...)
 {
@@ -304,6 +308,10 @@ esp_err_t rsc_server_init(rsc_conn_cb_t conn_cb, rsc_log_cb_t log_cb)
     s_log_cb = log_cb;
     s_connected = false;
     s_notifications_enabled = false;
+    s_notify_attempts = 0;
+    s_notify_sent = 0;
+    s_notify_skipped = 0;
+    s_notify_errors = 0;
 
     int rc = ble_gatts_count_cfg(rsc_svcs);
     if (rc != 0) {
@@ -377,7 +385,9 @@ esp_err_t rsc_server_start_advertising(void)
 
 esp_err_t rsc_server_notify(const rsc_data_t *data)
 {
+    s_notify_attempts++;
     if (!s_connected || !s_notifications_enabled) {
+        s_notify_skipped++;
         diag_trace_record(DIAG_EVT_RSC_SKIPPED, s_connected, s_notifications_enabled,
                           data->speed_256ths_mps, data->total_distance_dm, NULL, 0);
         ESP_LOGD(TAG, "Notify skip: conn=%d notif=%d", s_connected, s_notifications_enabled);
@@ -403,6 +413,7 @@ esp_err_t rsc_server_notify(const rsc_data_t *data)
 
     struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, offset);
     if (om == NULL) {
+        s_notify_errors++;
         ESP_LOGD(TAG, "mbuf alloc failed, skipping notify");
         return ESP_ERR_NO_MEM;
     }
@@ -412,14 +423,19 @@ esp_err_t rsc_server_notify(const rsc_data_t *data)
                       (uint32_t)rc, s_conn_handle, data->speed_256ths_mps,
                       data->total_distance_dm, buf, offset);
     if (rc == 0) {
+        s_notify_sent++;
         if (!s_first_notify_logged) {
             s_first_notify_logged = true;
             rsc_log('I', "RSC data flowing (spd=%d cad=%d)",
                     data->speed_256ths_mps, data->cadence_spm);
         }
     } else if (rc == BLE_HS_ENOMEM) {
+        s_notify_errors++;
+        diag_trace_record(DIAG_EVT_RSC_ERROR, (uint32_t)rc, s_conn_handle, 1, 0, NULL, 0);
         ESP_LOGD(TAG, "Notify backpressure, will retry next cycle");
     } else {
+        s_notify_errors++;
+        diag_trace_record(DIAG_EVT_RSC_ERROR, (uint32_t)rc, s_conn_handle, 0, 0, NULL, 0);
         rsc_log('E', "RSC notify failed: %d", rc);
     }
 
@@ -434,4 +450,13 @@ bool rsc_server_is_connected(void)
 bool rsc_server_notifications_enabled(void)
 {
     return s_notifications_enabled;
+}
+
+void rsc_server_get_diag_counters(uint32_t *attempts, uint32_t *sent,
+                                  uint32_t *skipped, uint32_t *errors)
+{
+    if (attempts) *attempts = s_notify_attempts;
+    if (sent) *sent = s_notify_sent;
+    if (skipped) *skipped = s_notify_skipped;
+    if (errors) *errors = s_notify_errors;
 }
