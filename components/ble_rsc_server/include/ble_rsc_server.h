@@ -13,3 +13,5 @@ esp_err_t rsc_server_start_advertising(void);
 esp_err_t rsc_server_notify(const rsc_data_t *data);
 bool rsc_server_is_connected(void);
 bool rsc_server_notifications_enabled(void);
+void rsc_server_get_diag_counters(uint32_t *attempts, uint32_t *sent,
+                                  uint32_t *skipped, uint32_t *errors);
