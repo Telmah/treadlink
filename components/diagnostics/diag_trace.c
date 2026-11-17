@@ -24,6 +24,11 @@ void diag_trace_record(uint8_t type, uint32_t a, uint32_t b,
                        uint32_t c, uint32_t d,
                        const uint8_t *data, uint8_t data_len)
 {
+    // Per-packet traffic is represented by periodic counters instead. Keeping
+    // these out of the ring preserves lifecycle events for multi-day captures.
+    if (type == DIAG_EVT_FTMS_RX || type == DIAG_EVT_RSC_SENT ||
+        type == DIAG_EVT_RSC_SKIPPED) return;
+
     int64_t now = esp_timer_get_time();
     portENTER_CRITICAL(&s_mux);
     diag_event_t *e = &s_ring[s_write_index % DIAG_RING_SIZE];
