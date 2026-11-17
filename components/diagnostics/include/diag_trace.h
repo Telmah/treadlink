@@ -43,4 +43,6 @@ void diag_trace_record(uint8_t type, uint32_t a, uint32_t b,
                        uint32_t c, uint32_t d,
                        const uint8_t *data, uint8_t data_len);
 size_t diag_trace_copy(diag_event_t *out, size_t capacity);
+size_t diag_trace_copy_range(diag_event_t *out, uint32_t first_sequence,
+                             uint32_t last_sequence, size_t capacity);
 uint32_t diag_trace_total(void);
