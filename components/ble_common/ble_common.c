@@ -1,4 +1,5 @@
 #include "ble_common.h"
+#include "diag_trace.h"
 #include "esp_log.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -15,6 +16,7 @@ static void ble_on_sync(void)
     int rc;
     uint8_t addr_type;
 
+    diag_trace_record(DIAG_EVT_BLE_HOST_SYNC, 0, 0, 0, 0, NULL, 0);
     rc = ble_hs_id_infer_auto(0, &addr_type);
     if (rc != 0) {
         ESP_LOGE(TAG, "Failed to infer address type: %d", rc);
@@ -31,6 +33,7 @@ static void ble_on_sync(void)
 
 static void ble_on_reset(int reason)
 {
+    diag_trace_record(DIAG_EVT_BLE_HOST_RESET, (uint32_t)reason, 0, 0, 0, NULL, 0);
     ESP_LOGW(TAG, "BLE host reset, reason: %d", reason);
 }
 
